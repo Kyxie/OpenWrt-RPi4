@@ -1,13 +1,9 @@
-# 工作流名称
 name: OpenWrt RaspberryPi 4B
 
-# 工作流触发时机, see: https://docs.github.com/zh/actions/using-workflows/triggering-a-workflow
-# 触发条件修改为: 当 main 分支有 push 操作 || 每天 0 点
 on:
   push:
-    # Sequence of patterns matched against refs/tags
     tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+      - 'v*'
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   TZ: America/Toronto
@@ -16,11 +12,9 @@ jobs:
   OpenWrt-RaspberryPi: 
     runs-on: ubuntu-latest  
     steps:
-      # step 1. 切到当前仓库
       - name: Checkout
         uses: actions/checkout@v3
         
-      # step 2. 更新相关依赖
       - name: Space cleanup
         run: |
           sudo -E apt-get update -y
@@ -35,51 +29,23 @@ jobs:
           sudo -E apt-get clean
           sudo timedatectl set-timezone "$TZ"
       
-      # step 3. 克隆仓库
-      - name: Clone openWrt
+      - name: Clone OpenWrt
         run: |
           git clone $REPO_URL openWrt
 
-      # step 4. 更新 feeds
       - name: Update feeds
         run: |
           cd openWrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
         
-      # step 5. 生成配置文件
-      - name: Generate config file
+      - name: Use .config from repository
         run: |
           cd openWrt
           rm -f ./.config*
-          touch ./.config
-
-          # 在 cat >> .config <<EOF 到 EOF 之间粘贴你的编译配置, 需注意缩进关系, 例如:
-
-          cat >> .config <<EOF
-
-          # RaspberryPi 4B 配置
-          CONFIG_TARGET_bcm27xx=y
-          CONFIG_TARGET_bcm27xx_bcm2711=y
-          CONFIG_TARGET_bcm27xx_bcm2711_DEVICE_rpi-4=y
-
-          # Set Firmware Size
-          CONFIG_TARGET_KERNEL_PARTSIZE=64
-          CONFIG_TARGET_ROOTFS_PARTSIZE=2048
-
-          # Firmware Type
-          CONFIG_TARGET_ROOTFS_TARGZ=y
-          # CONFIG_TARGET_ROOTFS_EXT4FS is not set
-          CONFIG_TARGET_ROOTFS_SQUASHFS=y
-
-          EOF
-
-          # ===============================================================
-
-          sed -i 's/^[ \t]*//g' ./.config # 删除文件中每行的所有前导空格
+          cp $GITHUB_WORKSPACE/.config .config
           make defconfig
     
-      # step 6. 编译
       - name: Make download
         run: |
           cd openWrt
@@ -87,7 +53,6 @@ jobs:
           make V=s -j8
           cd bin/targets/bcm27xx/bcm2711 && ls -n
       
-      # step 7. 创建 Release & 上传资源
       - name: Upload release
         uses: actions/github-script@v3
         with:
