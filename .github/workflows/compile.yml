@@ -1,0 +1,121 @@
+# 工作流名称
+name: OpenWrt RaspberryPi 4B
+
+# 工作流触发时机, see: https://docs.github.com/zh/actions/using-workflows/triggering-a-workflow
+# 触发条件修改为: 当 main 分支有 push 操作 || 每天 0 点
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  TZ: America/Toronto
+
+jobs:
+  OpenWrt-RaspberryPi: 
+    runs-on: ubuntu-latest  
+    steps:
+      # step 1. 切到当前仓库
+      - name: Checkout
+        uses: actions/checkout@v3
+        
+      # step 2. 更新相关依赖
+      - name: Space cleanup
+        run: |
+          sudo -E apt-get update -y
+          sudo -E apt-get full-upgrade -y
+          sudo -E apt-get install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+            git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+            libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 \
+            python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+            uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+          sudo -E apt-get clean
+          sudo timedatectl set-timezone "$TZ"
+      
+      # step 3. 克隆仓库
+      - name: Clone openWrt
+        run: |
+          git clone $REPO_URL openWrt
+
+      # step 4. 更新 feeds
+      - name: Update feeds
+        run: |
+          cd openWrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+        
+      # step 5. 生成配置文件
+      - name: Generate config file
+        run: |
+          cd openWrt
+          rm -f ./.config*
+          touch ./.config
+
+          # 在 cat >> .config <<EOF 到 EOF 之间粘贴你的编译配置, 需注意缩进关系, 例如:
+
+          cat >> .config <<EOF
+
+          # RaspberryPi 4B 配置
+          CONFIG_TARGET_bcm27xx=y
+          CONFIG_TARGET_bcm27xx_bcm2711=y
+          CONFIG_TARGET_bcm27xx_bcm2711_DEVICE_rpi-4=y
+
+          # Set Firmware Size
+          CONFIG_TARGET_KERNEL_PARTSIZE=64
+          CONFIG_TARGET_ROOTFS_PARTSIZE=2048
+
+          # Firmware Type
+          CONFIG_TARGET_ROOTFS_TARGZ=y
+          # CONFIG_TARGET_ROOTFS_EXT4FS is not set
+          CONFIG_TARGET_ROOTFS_SQUASHFS=y
+
+          EOF
+
+          # ===============================================================
+
+          sed -i 's/^[ \t]*//g' ./.config # 删除文件中每行的所有前导空格
+          make defconfig
+    
+      # step 6. 编译
+      - name: Make download
+        run: |
+          cd openWrt
+          make download -j8
+          make V=s -j8
+          cd bin/targets/bcm27xx/bcm2711 && ls -n
+      
+      # step 7. 创建 Release & 上传资源
+      - name: Upload release
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const { repo: { owner, repo }, sha } = context;
+            console.log({ owner, repo, sha });
+
+            const release = await github.repos.createRelease({
+              owner, repo,
+              draft: true,
+              target_commitish: sha,
+              tag_name: process.env.GITHUB_REF,
+            });
+
+            for (let file of await fs.readdirSync('./openWrt/bin/targets/bcm27xx/bcm2711')) {
+              const filePath = `./openWrt/bin/targets/bcm27xx/bcm2711/${file}`
+
+              if (/\.gz$/.test(file)) {
+                await github.repos.uploadReleaseAsset({
+                  repo,
+                  owner, 
+                  name: file,
+                  release_id: release.data.id,
+                  data: await fs.readFileSync(filePath)
+                }); 
+              }
+            }
