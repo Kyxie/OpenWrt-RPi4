@@ -29,9 +29,16 @@ jobs:
           sudo -E apt-get clean
           sudo timedatectl set-timezone "$TZ"
       
-      - name: Clone OpenWrt
+      - name: Update Repo
         run: |
-          git clone $REPO_URL openWrt
+          if [ -d "openWrt" ]; then
+            cd openWrt
+            git reset --hard
+            git pull
+          else
+            git clone $REPO_URL openWrt
+            cd openWrt
+          fi
 
       - name: Update feeds
         run: |
@@ -39,7 +46,12 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
         
-      - name: Use .config from repository
+      - name: Clean build directory
+        run: |
+          cd openWrt
+          make dirclean
+        
+      - name: Use .config from repo
         run: |
           cd openWrt
           rm -f ./.config*
